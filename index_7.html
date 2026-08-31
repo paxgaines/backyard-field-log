@@ -1,0 +1,2015 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Backyard Species Log — Mauldin, SC</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%23FAF8F1'/%3E%3Cpath d='M9 22c0-8 6-13 14-13-1 8-6 13-14 13z' fill='%232E6B3E'/%3E%3Cpath d='M9 22c3-5 7-8 12-10' stroke='%23FAF8F1' stroke-width='1.3' fill='none'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Spectral:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+  * { box-sizing: border-box; }
+
+  :root {
+    --bg: #FAF8F1;
+    --card-bg: #FFFFFF;
+    --card-bg-soft: #FFFEF9;
+    --border: #E6E0D2;
+    --border-soft: #F1EDE0;
+    --text: #17241D;
+    --text-muted: #6B7A72;
+    --text-dim: #9AA79E;
+    --tabs-bg: #F2EEE1;
+    --input-bg: #FFFEF9;
+    --shadow: rgba(23,36,29,0.12);
+  }
+  [data-theme="dark"] {
+    --bg: #12150F;
+    --card-bg: #1C2118;
+    --card-bg-soft: #20251B;
+    --border: #303829;
+    --border-soft: #262C20;
+    --text: #ECEFE5;
+    --text-muted: #9FAE99;
+    --text-dim: #6E7A69;
+    --tabs-bg: #1A1E15;
+    --input-bg: #1A1E15;
+    --shadow: rgba(0,0,0,0.4);
+  }
+
+  body { margin: 0; font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); transition: background .15s ease, color .15s ease; }
+  .ffont { font-family: 'Spectral', serif; }
+  .mfont { font-family: 'IBM Plex Mono', monospace; }
+  input, select, textarea, button { font-family: 'Inter', sans-serif; }
+  button { cursor: pointer; }
+  ::placeholder { color: var(--text-dim); }
+  #root { max-width: 880px; margin: 0 auto; padding: 28px 20px 60px; }
+
+  .skel {
+    background: linear-gradient(90deg, var(--border-soft) 25%, var(--border) 37%, var(--border-soft) 63%);
+    background-size: 400% 100%;
+    animation: skel-pulse 1.4s ease infinite;
+  }
+  @keyframes skel-pulse {
+    0% { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+  }
+
+  .leaflet-container { font-family: 'Inter', sans-serif; background: var(--card-bg-soft) !important; }
+  [data-theme="dark"] .leaflet-tile-pane { filter: brightness(0.78) invert(1) contrast(0.85) hue-rotate(200deg) saturate(0.55); }
+  [data-theme="dark"] .leaflet-control-attribution { background: rgba(0,0,0,0.5) !important; color: #ccc !important; }
+  [data-theme="dark"] .leaflet-control-attribution a { color: #9dd6ff !important; }
+
+  @media (max-width: 640px) {
+    .tabs-nav {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      margin: 0;
+      border-radius: 0;
+      z-index: 40;
+      box-shadow: 0 -4px 16px var(--shadow);
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    #root { padding-bottom: 92px; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel">
+const { useState, useMemo } = React;
+
+const CATEGORIES = [
+  { id: "bird", label: "Bird", color: "#2B7A94", glyph: "\u{1F426}" },
+  { id: "mammal", label: "Mammal", color: "#B5651D", glyph: "\u{1F43E}" },
+  { id: "insect", label: "Insect / Arachnid", color: "#A8455F", glyph: "\u{1F41B}" },
+  { id: "herp", label: "Reptile / Amphibian", color: "#1F8A68", glyph: "\u{1F438}" },
+  { id: "plant", label: "Plant", color: "#3F7A32", glyph: "\u{1F33F}" },
+  { id: "fungus", label: "Fungus / Lichen", color: "#7A4F94", glyph: "\u{1F344}" },
+  { id: "other", label: "Other", color: "#6B7280", glyph: "✳" },
+];
+
+const MILESTONES = [5, 10, 25, 50, 100, 150, 200];
+
+const catMeta = (id) => CATEGORIES.find((c) => c.id === id) || CATEGORIES[6];
+const todayStr = () => new Date().toISOString().slice(0, 10);
+const uid = () => Math.random().toString(36).slice(2, 10);
+
+// ---------- Category line-icon system (replaces platform emoji) ----------
+function CategoryIcon({ id, color, size }) {
+  const s = size || 18;
+  const common = { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: color, strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" };
+  switch (id) {
+    case "bird":
+      return (
+        <svg {...common}>
+          <path d="M3 14c3-6 8-9 13-8 3 .6 5 3 5 5.5-1.2.6-2.6.6-3.7-.2" />
+          <circle cx="16.6" cy="8.2" r="0.6" fill={color} stroke="none" />
+          <path d="M9 13c-1.6 3-4 4.6-6 5" />
+          <path d="M12 12.5l1.5 3.5M15 11l.8 4" />
+        </svg>
+      );
+    case "mammal":
+      return (
+        <svg {...common}>
+          <ellipse cx="12" cy="15.5" rx="4.6" ry="3.4" />
+          <circle cx="7" cy="9.3" r="1.6" />
+          <circle cx="10.6" cy="7" r="1.6" />
+          <circle cx="14.4" cy="7" r="1.6" />
+          <circle cx="18" cy="9.3" r="1.6" />
+        </svg>
+      );
+    case "insect":
+      return (
+        <svg {...common}>
+          <ellipse cx="12" cy="14" rx="3.4" ry="5.2" />
+          <circle cx="12" cy="6.6" r="2.2" />
+          <path d="M10.3 5L8 3M13.7 5l2.3-2" />
+          <path d="M8.2 11l-3.4-1.4M8.2 14.5l-3.6.4M8.2 18l-3 2M15.8 11l3.4-1.4M15.8 14.5l3.6.4M15.8 18l3 2" />
+        </svg>
+      );
+    case "herp":
+      return (
+        <svg {...common}>
+          <path d="M5 13c0-3.3 2.8-6 7-6s7 2.7 7 6-2.8 5-7 5-7-1.7-7-5z" />
+          <circle cx="7.5" cy="10.5" r="0.6" fill={color} stroke="none" />
+          <path d="M3 8.5c1-.8 2-.8 2.6 0M20 17c1.3.6 2.4 1.8 3 3.3M9 18.3c-.4 1.4-1.3 2.4-2.6 2.9M15 18.3c.4 1.4 1.3 2.4 2.6 2.9" />
+        </svg>
+      );
+    case "plant":
+      return (
+        <svg {...common}>
+          <path d="M12 21V9" />
+          <path d="M12 13c0-5 3.5-8.5 8-9 0 5-3 9-8 9z" />
+          <path d="M12 16c0-4-3-7-7-7.5 0 4.2 2.6 7.5 7 7.5z" />
+        </svg>
+      );
+    case "fungus":
+      return (
+        <svg {...common}>
+          <path d="M4.5 11.5c0-4 3.3-6.5 7.5-6.5s7.5 2.5 7.5 6.5H4.5z" />
+          <path d="M9.5 11.5V18a2.5 2.5 0 005 0v-6.5" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...common}>
+          <path d="M12 3v18M4.5 7.5l15 9M19.5 7.5l-15 9" />
+        </svg>
+      );
+  }
+}
+
+function SunIcon({ size }) {
+  const s = size || 16;
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <circle cx="12" cy="12" r="4.2" />
+      <path d="M12 2.5v2.5M12 19v2.5M4.5 4.5l1.8 1.8M17.7 17.7l1.8 1.8M2.5 12h2.5M19 12h2.5M4.5 19.5l1.8-1.8M17.7 6.3l1.8-1.8" />
+    </svg>
+  );
+}
+function MoonIcon({ size }) {
+  const s = size || 16;
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.8 6.8 0 0 0 10.5 10.5z" />
+    </svg>
+  );
+}
+function PinIcon({ size }) {
+  const s = size || 16;
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 21s7-6.6 7-12a7 7 0 10-14 0c0 5.4 7 12 7 12z" />
+      <circle cx="12" cy="9" r="2.4" />
+    </svg>
+  );
+}
+
+const wikiCache = {};
+
+function fetchTaxonPhoto(name) {
+  return fetch("https://api.inaturalist.org/v1/taxa?q=" + encodeURIComponent(name) + "&per_page=1&is_active=true", { headers: { Accept: "application/json" } })
+    .then((res) => { if (!res.ok) throw new Error("no taxon"); return res.json(); })
+    .then((data) => {
+      const taxon = data.results && data.results[0];
+      const photo = taxon && taxon.default_photo;
+      if (!photo) return null;
+      return photo.medium_url || photo.square_url || null;
+    })
+    .catch(() => null);
+}
+
+function fetchWikiSummary(name) {
+  const key = name.toLowerCase();
+  if (wikiCache[key]) return wikiCache[key];
+  const promise = fetch("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(name), { headers: { Accept: "application/json" } })
+    .then((res) => { if (!res.ok) throw new Error("not found"); return res.json(); })
+    .then((data) => ({
+      extract: data.extract || "",
+      thumbnail: data.thumbnail ? data.thumbnail.source : null,
+      pageUrl: (data.content_urls && data.content_urls.desktop && data.content_urls.desktop.page) || ("https://en.wikipedia.org/wiki/" + encodeURIComponent(name.replace(/ /g, "_"))),
+      imageSource: data.thumbnail ? "wikipedia" : null,
+    }))
+    .catch(() => ({
+      extract: "",
+      thumbnail: null,
+      pageUrl: "https://en.wikipedia.org/wiki/Special:Search?search=" + encodeURIComponent(name),
+      imageSource: null,
+    }))
+    .then((result) => {
+      if (result.thumbnail) return result;
+      return fetchTaxonPhoto(name).then((photoUrl) => {
+        return photoUrl ? { ...result, thumbnail: photoUrl, imageSource: "inaturalist" } : result;
+      });
+    });
+  wikiCache[key] = promise;
+  return promise;
+}
+
+function briefText(extract) {
+  if (!extract) return "";
+  const firstSentence = extract.split(/(?<=[.!?])\s/)[0];
+  return firstSentence.length > 160 ? firstSentence.slice(0, 157) + "…" : firstSentence;
+}
+
+function SpeciesInfoCard({ name, categoryId }) {
+  const [info, setInfo] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const color = catMeta(categoryId).color;
+
+  React.useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    fetchWikiSummary(name).then((data) => { if (alive) { setInfo(data); setLoading(false); } });
+    return () => { alive = false; };
+  }, [name]);
+
+  return (
+    <div style={styles.guideCard}>
+      <div className={loading ? "skel" : ""} style={styles.guideImageWrap}>
+        {!loading && info && info.thumbnail ? (
+          <img src={info.thumbnail} alt={name} style={styles.guideImage} />
+        ) : !loading ? (
+          <CategoryIcon id={categoryId} color={color} size={34} />
+        ) : null}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={styles.guideCardTop}>
+          <span className="ffont" style={styles.guideName}>{name}</span>
+          <a href={info ? info.pageUrl : "#"} target="_blank" rel="noopener noreferrer" style={styles.infoLink} title="More information on Wikipedia">i</a>
+        </div>
+        {loading ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 6 }}>
+            <div className="skel" style={{ height: 10, borderRadius: 4, width: "90%" }} />
+            <div className="skel" style={{ height: 10, borderRadius: 4, width: "60%" }} />
+          </div>
+        ) : (
+          <p style={styles.guideDesc}>{briefText(info && info.extract) || "No summary available."}</p>
+        )}
+        {info && info.imageSource === "inaturalist" && (
+          <p style={styles.photoCredit}>Photo via iNaturalist</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SpeciesHoverPopup({ name, categoryId }) {
+  const [info, setInfo] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const color = catMeta(categoryId).color;
+
+  React.useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    fetchWikiSummary(name).then((data) => { if (alive) { setInfo(data); setLoading(false); } });
+    return () => { alive = false; };
+  }, [name]);
+
+  return (
+    <div style={styles.hoverPopup}>
+      <div className={loading ? "skel" : ""} style={styles.hoverImageWrap}>
+        {!loading && info && info.thumbnail ? (
+          <img src={info.thumbnail} alt={name} style={styles.hoverImage} />
+        ) : !loading ? (
+          <CategoryIcon id={categoryId} color={color} size={44} />
+        ) : null}
+      </div>
+      {info && info.imageSource === "inaturalist" && (
+        <p style={styles.photoCredit}>Photo via iNaturalist</p>
+      )}
+      <p className="ffont" style={styles.hoverName}>{name}</p>
+      {loading ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 6, alignItems: "center" }}>
+          <div className="skel" style={{ height: 9, borderRadius: 4, width: "85%" }} />
+          <div className="skel" style={{ height: 9, borderRadius: 4, width: "55%" }} />
+        </div>
+      ) : (
+        <p style={styles.hoverDesc}>{briefText(info && info.extract) || "No summary available."}</p>
+      )}
+      {info && info.pageUrl && (
+        <a href={info.pageUrl} target="_blank" rel="noopener noreferrer" style={styles.hoverLink}>
+          More on Wikipedia {"→"}
+        </a>
+      )}
+    </div>
+  );
+}
+
+function iconicToCategory(iconic) {
+  if (iconic === "Aves") return "bird";
+  if (iconic === "Mammalia") return "mammal";
+  if (iconic === "Insecta" || iconic === "Arachnida") return "insect";
+  if (iconic === "Reptilia" || iconic === "Amphibia") return "herp";
+  if (iconic === "Plantae") return "plant";
+  if (iconic === "Fungi") return "fungus";
+  return "other";
+}
+
+function titleCase(s) {
+  return s.replace(/\w\S*/g, (t) => t.charAt(0).toUpperCase() + t.slice(1).toLowerCase());
+}
+
+const LOCATION_CAPS = { bird: 40, mammal: 19, insect: 31, herp: 25, plant: 33, fungus: 10, other: 8 };
+
+const NATIVE_SPECIES = {
+  bird: ["Northern Cardinal", "Carolina Wren", "Carolina Chickadee", "Tufted Titmouse", "Blue Jay", "American Robin", "Mourning Dove", "Eastern Bluebird", "Red-bellied Woodpecker", "Downy Woodpecker", "Hairy Woodpecker", "Pileated Woodpecker", "House Finch", "American Goldfinch", "Chipping Sparrow", "Song Sparrow", "White-throated Sparrow", "White-breasted Nuthatch", "Brown-headed Nuthatch", "Ruby-throated Hummingbird", "Brown Thrasher", "Eastern Towhee", "Northern Mockingbird", "Eastern Phoebe", "Blue-gray Gnatcatcher", "Pine Warbler", "Yellow-rumped Warbler", "Chimney Swift", "Belted Kingfisher", "Killdeer", "Red-winged Blackbird", "Common Grackle", "European Starling", "House Sparrow", "Barred Owl", "Great Horned Owl", "Red-tailed Hawk", "Red-shouldered Hawk", "Cooper's Hawk", "Turkey Vulture", "Black Vulture", "Canada Goose"],
+  mammal: ["White-tailed Deer", "Eastern Gray Squirrel", "Eastern Fox Squirrel", "Southern Flying Squirrel", "Eastern Cottontail", "Raccoon", "Virginia Opossum", "Eastern Chipmunk", "Groundhog", "Red Fox", "Gray Fox", "Coyote", "Bobcat", "Striped Skunk", "Eastern Spotted Skunk", "White-footed Mouse", "Eastern Mole", "Big Brown Bat", "Nine-banded Armadillo"],
+  insect: ["Eastern Tiger Swallowtail", "Black Swallowtail", "Spicebush Swallowtail", "Pipevine Swallowtail", "Zebra Swallowtail", "Monarch Butterfly", "Viceroy", "Gulf Fritillary", "Variegated Fritillary", "Great Spangled Fritillary", "Red-spotted Purple", "Question Mark", "Eastern Comma", "Mourning Cloak", "American Lady", "Painted Lady", "Common Buckeye", "Cabbage White", "Clouded Sulphur", "Cloudless Sulphur", "Sleepy Orange", "Silver-spotted Skipper", "Carpenter Bee", "Honeybee", "Bumblebee", "Japanese Beetle", "Firefly", "Carolina Mantis", "Yellow Garden Spider", "Wolf Spider", "Dog-day Cicada"],
+  herp: ["Eastern Box Turtle", "Yellow-bellied Slider", "Painted Turtle", "Common Snapping Turtle", "Five-lined Skink", "Broad-headed Skink", "Green Anole", "Eastern Fence Lizard", "Black Racer", "Eastern Rat Snake", "Eastern Kingsnake", "Corn Snake", "Eastern Garter Snake", "Rough Earthsnake", "Copperhead", "Eastern Hognose Snake", "American Toad", "Fowler's Toad", "Gray Treefrog", "Green Treefrog", "Spring Peeper", "American Bullfrog", "Southern Leopard Frog", "Marbled Salamander", "Spotted Salamander"],
+  plant: ["Loblolly Pine", "Shortleaf Pine", "Eastern White Pine", "Eastern Red Cedar", "Southern Magnolia", "Eastern Redbud", "Flowering Dogwood", "Sweetgum", "White Oak", "Southern Red Oak", "Willow Oak", "Water Oak", "Red Maple", "Florida Maple", "Tulip Poplar", "American Holly", "Black Walnut", "Shagbark Hickory", "Sourwood", "American Beautyberry", "Muscadine Grape", "Virginia Creeper", "Poison Ivy", "Trumpet Creeper", "Coral Honeysuckle", "Black-eyed Susan", "Joe Pye Weed", "Cardinal Flower", "Wild Violet", "Christmas Fern", "Witch Hazel", "Oakleaf Hydrangea", "Virginia Sweetspire"],
+  fungus: ["Turkey Tail", "Chicken of the Woods", "Common Puffball", "British Soldier Lichen", "Reishi", "Old Man's Beard Lichen", "Shelf Fungus", "Dog Vomit Slime Mold", "Jack-o'-Lantern Mushroom", "Destroying Angel"],
+  other: [],
+};
+
+const emptyForm = { species: "", category: "bird", date: todayStr(), quantity: 1, location: "", note: "", photo: "" };
+
+function emptySpeciesBuckets() {
+  return { bird: [], mammal: [], insect: [], herp: [], plant: [], fungus: [], other: [] };
+}
+
+async function fetchSpeciesBuckets(lat, lon) {
+  const res = await fetch("https://api.inaturalist.org/v1/observations/species_counts?lat=" + lat + "&lng=" + lon + "&radius=50&per_page=500&verifiable=true");
+  const data = await res.json();
+  const buckets = emptySpeciesBuckets();
+  const seen = new Set();
+  (data.results || []).forEach((r) => {
+    const taxon = r.taxon;
+    if (!taxon) return;
+    const cat = iconicToCategory(taxon.iconic_taxon_name);
+    const rawLabel = taxon.preferred_common_name || taxon.name;
+    if (!rawLabel) return;
+    const label = titleCase(rawLabel);
+    const key = cat + ":" + label.toLowerCase();
+    if (seen.has(key)) return;
+    if (buckets[cat].length >= LOCATION_CAPS[cat]) return;
+    seen.add(key);
+    buckets[cat].push(label);
+  });
+  return buckets;
+}
+
+function resizePhoto(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("read failed"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("decode failed"));
+      img.onload = () => {
+        const maxW = 640;
+        const scale = Math.min(1, maxW / img.width);
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.72));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+const DEFAULT_LOCATION = { id: "default", name: "Mauldin, SC", lat: "34.7834", lon: "-82.3021", displayName: "Mauldin, Greenville County, South Carolina" };
+
+const STORAGE_KEYS = {
+  entries: "bfl_entries_v2",
+  locations: "bfl_locations_v2",
+  activeLocation: "bfl_active_location_v2",
+  theme: "bfl_theme_v2",
+};
+
+function loadJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return parsed === undefined || parsed === null ? fallback : parsed;
+  } catch (err) {
+    return fallback;
+  }
+}
+
+// ---- accounts + friends backend (Firebase) ----
+const firebaseConfig = {
+  apiKey: "AIzaSyAGqUoIPy_14-whaaiR2OKw7JniIDOhAQg",
+  authDomain: "backyard-field-log.firebaseapp.com",
+  projectId: "backyard-field-log",
+  storageBucket: "backyard-field-log.firebasestorage.app",
+  messagingSenderId: "704655952577",
+  appId: "1:704655952577:web:61369ffab0f86cdfbde240",
+  measurementId: "G-FLBQJ4V85G",
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+function normalizeEmail(e) {
+  return (e || "").trim().toLowerCase();
+}
+
+function nowTs() {
+  return Date.now();
+}
+
+function entriesCol(uid) {
+  return db.collection("users").doc(uid).collection("entries");
+}
+function locationsCol(uid) {
+  return db.collection("users").doc(uid).collection("locations");
+}
+
+async function pullCloudData(uid) {
+  const [entriesSnap, locationsSnap] = await Promise.all([
+    entriesCol(uid).get(),
+    locationsCol(uid).get(),
+  ]);
+  return {
+    entries: entriesSnap.docs.map((d) => d.data()),
+    locations: locationsSnap.docs.map((d) => d.data()),
+  };
+}
+
+// merges two lists of {id, updatedAt} records, keeping whichever copy of
+// each id is newer so two devices that both made offline changes reconcile
+function mergeById(localList, cloudList) {
+  const map = new Map();
+  localList.forEach((item) => map.set(item.id, item));
+  cloudList.forEach((item) => {
+    const existing = map.get(item.id);
+    if (!existing) { map.set(item.id, item); return; }
+    const localTime = existing.updatedAt || 0;
+    const cloudTime = item.updatedAt || 0;
+    if (cloudTime > localTime) map.set(item.id, item);
+  });
+  return Array.from(map.values());
+}
+
+function StatCard({ label, value, accent }) {
+  return (
+    <div style={{ ...styles.statCard, background: accent + "14", border: "1.5px solid " + accent + "35" }}>
+      <p style={{ ...styles.statLabel, color: accent }}>{label}</p>
+      <p className="mfont" style={{ ...styles.statValue, color: "var(--text)" }}>{value}</p>
+    </div>
+  );
+}
+
+function TabButton({ label, active, onClick, accent }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        ...styles.tabButton,
+        ...(active ? { background: accent, color: "#FFFFFF", fontWeight: 700 } : {}),
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label style={styles.field}>
+      <span style={styles.fieldLabel}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function LocationsMap({ locations, activeLocationId, onSelect, onMapClick, addPin }) {
+  const mapRef = React.useRef(null);
+  const mapInstance = React.useRef(null);
+  const markersRef = React.useRef([]);
+  const addMarkerRef = React.useRef(null);
+  const onMapClickRef = React.useRef(onMapClick);
+  React.useEffect(() => { onMapClickRef.current = onMapClick; }, [onMapClick]);
+
+  React.useEffect(() => {
+    if (!window.L || !mapRef.current) return;
+    if (!mapInstance.current) {
+      mapInstance.current = window.L.map(mapRef.current, { scrollWheelZoom: false }).setView([34.7834, -82.3021], 6);
+      window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "&copy; OpenStreetMap contributors",
+        maxZoom: 18,
+      }).addTo(mapInstance.current);
+      mapInstance.current.on("click", (e) => {
+        if (onMapClickRef.current) onMapClickRef.current(e.latlng.lat, e.latlng.lng);
+      });
+    }
+    const map = mapInstance.current;
+    markersRef.current.forEach((m) => map.removeLayer(m));
+    markersRef.current = [];
+    const pts = [];
+    locations.forEach((loc) => {
+      const lat = parseFloat(loc.lat);
+      const lon = parseFloat(loc.lon);
+      if (Number.isNaN(lat) || Number.isNaN(lon)) return;
+      const isActive = loc.id === activeLocationId;
+      const marker = window.L.circleMarker([lat, lon], {
+        radius: isActive ? 9 : 6,
+        color: isActive ? "#1F8A68" : "#8A7F63",
+        fillColor: isActive ? "#1F8A68" : "#C9BFA0",
+        fillOpacity: 0.85,
+        weight: 2,
+      }).addTo(map);
+      marker.bindTooltip(loc.name);
+      marker.on("click", (e) => {
+        window.L.DomEvent.stopPropagation(e);
+        onSelect(loc.id);
+      });
+      markersRef.current.push(marker);
+      pts.push([lat, lon]);
+    });
+    if (pts.length > 1) {
+      map.fitBounds(pts, { padding: [30, 30] });
+    } else if (pts.length === 1) {
+      map.setView(pts[0], 10);
+    }
+    setTimeout(() => map.invalidateSize(), 50);
+  }, [locations, activeLocationId]);
+
+  // temporary marker + spinner while a tapped point is being turned into a location
+  React.useEffect(() => {
+    const map = mapInstance.current;
+    if (!map) return;
+    if (addMarkerRef.current) {
+      map.removeLayer(addMarkerRef.current);
+      addMarkerRef.current = null;
+    }
+    if (addPin) {
+      addMarkerRef.current = window.L.circleMarker([addPin.lat, addPin.lng], {
+        radius: 8,
+        color: "#C9922E",
+        fillColor: "#C9922E",
+        fillOpacity: 0.5,
+        weight: 2,
+        dashArray: "3,3",
+      }).addTo(map);
+    }
+  }, [addPin]);
+
+  return <div ref={mapRef} style={styles.mapBox} />;
+}
+
+function BackyardFieldLog() {
+  const [entries, setEntries] = useState(() => loadJSON(STORAGE_KEYS.entries, []));
+  const [form, setForm] = useState(emptyForm);
+  const [tab, setTab] = useState("log");
+  const [search, setSearch] = useState("");
+  const [filterCategory, setFilterCategory] = useState("all");
+  const [filterLocation, setFilterLocation] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [showForm, setShowForm] = useState(true);
+  const [importError, setImportError] = useState("");
+  const [storageError, setStorageError] = useState("");
+  const [expandedSpecies, setExpandedSpecies] = useState(null);
+  const [previewSpecies, setPreviewSpecies] = useState(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [theme, setTheme] = useState(() => loadJSON(STORAGE_KEYS.theme, "light"));
+  const [toast, setToast] = useState(null);
+
+  const [locations, setLocations] = useState(() => loadJSON(STORAGE_KEYS.locations, []));
+  const [activeLocationId, setActiveLocationId] = useState(() => loadJSON(STORAGE_KEYS.activeLocation, null));
+  const [locationSpeciesCache, setLocationSpeciesCache] = useState({});
+  const [locationStatus, setLocationStatus] = useState({});
+  const [newLocationName, setNewLocationName] = useState("");
+  const [newLocationQuery, setNewLocationQuery] = useState("");
+  const [addingLocation, setAddingLocation] = useState(false);
+  const [addLocationError, setAddLocationError] = useState("");
+  const [mapPin, setMapPin] = useState(null);
+  const [mapAddStatus, setMapAddStatus] = useState("");
+  const [mapAddError, setMapAddError] = useState("");
+
+  const [resetScope, setResetScope] = useState("month");
+  const [resetMonth, setResetMonth] = useState(() => todayStr().slice(0, 7));
+  const [resetYear, setResetYear] = useState(() => todayStr().slice(0, 4));
+  const [confirmResetText, setConfirmResetText] = useState("");
+
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authMode, setAuthMode] = useState("signin");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authDisplayName, setAuthDisplayName] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [friendEmail, setFriendEmail] = useState("");
+  const [friendError, setFriendError] = useState("");
+  const [friendBusy, setFriendBusy] = useState(false);
+  const [incomingRequests, setIncomingRequests] = useState([]);
+  const [outgoingRequests, setOutgoingRequests] = useState([]);
+  const [friends, setFriends] = useState([]);
+  const [syncStatus, setSyncStatus] = useState("");
+
+  const needsLocation = locations.length === 0;
+  const activeLocation = locations.find((l) => l.id === activeLocationId) || locations[0] || null;
+  const speciesForActive = locationSpeciesCache[activeLocationId] || emptySpeciesBuckets();
+
+  // ---- persistence ----
+  React.useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEYS.entries, JSON.stringify(entries)); setStorageError(""); }
+    catch (err) { setStorageError("Your browser's storage is full — remove a few photos to free up space so new sightings keep saving."); }
+  }, [entries]);
+  React.useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEYS.locations, JSON.stringify(locations)); } catch (err) { /* ignore */ }
+  }, [locations]);
+  React.useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEYS.activeLocation, JSON.stringify(activeLocationId)); } catch (err) { /* ignore */ }
+  }, [activeLocationId]);
+  React.useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEYS.theme, JSON.stringify(theme)); } catch (err) { /* ignore */ }
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
+
+  // ---- accounts + friends ----
+  React.useEffect(() => {
+    const unsub = auth.onAuthStateChanged((u) => { setUser(u); setAuthLoading(false); });
+    return unsub;
+  }, []);
+
+  React.useEffect(() => {
+    if (!user) { setIncomingRequests([]); setOutgoingRequests([]); setFriends([]); setSyncStatus(""); return; }
+    refreshSocialData(user.uid);
+    syncOnSignIn(user.uid);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  async function retryLocationSpecies(loc) {
+    setLocationStatus((prev) => ({ ...prev, [loc.id]: "loading" }));
+    try {
+      const buckets = await fetchSpeciesBuckets(loc.lat, loc.lon);
+      setLocationSpeciesCache((prev) => ({ ...prev, [loc.id]: buckets }));
+      setLocationStatus((prev) => ({ ...prev, [loc.id]: "done" }));
+    } catch (err) {
+      setLocationStatus((prev) => ({ ...prev, [loc.id]: "error" }));
+    }
+  }
+
+  // species buckets aren't persisted (only geocoded location metadata is) —
+  // refetch them for every saved location once on load.
+  React.useEffect(() => {
+    locations.forEach((loc) => {
+      if (!locationSpeciesCache[loc.id]) {
+        retryLocationSpecies(loc);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function addLocation(e) {
+    e.preventDefault();
+    const query = newLocationQuery.trim();
+    if (!query) return;
+    setAddingLocation(true);
+    setAddLocationError("");
+    try {
+      const geoRes = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(query));
+      const geoData = await geoRes.json();
+      if (!geoData || !geoData.length) {
+        setAddLocationError("Couldn't find that location. Try a city and state, or a zip code.");
+        setAddingLocation(false);
+        return;
+      }
+      const lat = geoData[0].lat;
+      const lon = geoData[0].lon;
+      const displayName = geoData[0].display_name;
+      const id = uid();
+      const label = newLocationName.trim() || displayName.split(",")[0];
+      const newLoc = { id, name: label, lat, lon, displayName, updatedAt: nowTs() };
+      setLocations((prev) => [...prev, newLoc]);
+      if (user) locationsCol(user.uid).doc(id).set(newLoc).catch(() => {});
+      setLocationStatus((prev) => ({ ...prev, [id]: "loading" }));
+      setActiveLocationId(id);
+      setNewLocationName("");
+      setNewLocationQuery("");
+      setAddingLocation(false);
+      try {
+        const buckets = await fetchSpeciesBuckets(lat, lon);
+        setLocationSpeciesCache((prev) => ({ ...prev, [id]: buckets }));
+        setLocationStatus((prev) => ({ ...prev, [id]: "done" }));
+      } catch (err) {
+        setLocationStatus((prev) => ({ ...prev, [id]: "error" }));
+      }
+    } catch (err) {
+      setAddLocationError("Something went wrong looking that up. Try again in a moment.");
+      setAddingLocation(false);
+    }
+  }
+
+  async function addLocationFromLatLng(lat, lon) {
+    // if the tap landed close to a location we already have, just switch to it
+    const nearby = locations.find((loc) => {
+      const dLat = Math.abs(parseFloat(loc.lat) - lat);
+      const dLon = Math.abs(parseFloat(loc.lon) - lon);
+      return dLat < 0.03 && dLon < 0.03; // roughly within ~2 miles
+    });
+    if (nearby) {
+      setActiveLocationId(nearby.id);
+      return;
+    }
+
+    setMapPin({ lat, lng: lon });
+    setMapAddStatus("locating");
+    setMapAddError("");
+    try {
+      const geoRes = await fetch("https://nominatim.openstreetmap.org/reverse?format=json&lat=" + lat + "&lon=" + lon + "&zoom=12");
+      const geoData = await geoRes.json();
+      const addr = geoData && geoData.address ? geoData.address : {};
+      const label = addr.city || addr.town || addr.village || addr.hamlet || addr.county
+        || (geoData && geoData.display_name ? geoData.display_name.split(",")[0] : null)
+        || "Dropped pin";
+      const displayName = (geoData && geoData.display_name) || (lat.toFixed(4) + ", " + lon.toFixed(4));
+      const id = uid();
+      const newLoc = { id, name: label, lat: String(lat), lon: String(lon), displayName, updatedAt: nowTs() };
+      setLocations((prev) => [...prev, newLoc]);
+      if (user) locationsCol(user.uid).doc(id).set(newLoc).catch(() => {});
+      setLocationStatus((prev) => ({ ...prev, [id]: "loading" }));
+      setActiveLocationId(id);
+      setMapAddStatus("");
+      setMapPin(null);
+      try {
+        const buckets = await fetchSpeciesBuckets(lat, lon);
+        setLocationSpeciesCache((prev) => ({ ...prev, [id]: buckets }));
+        setLocationStatus((prev) => ({ ...prev, [id]: "done" }));
+      } catch (err) {
+        setLocationStatus((prev) => ({ ...prev, [id]: "error" }));
+      }
+    } catch (err) {
+      setMapAddStatus("");
+      setMapPin(null);
+      setMapAddError("Couldn't identify that spot. Try tapping again, or use the search box below.");
+    }
+  }
+
+  function useMyLocation() {
+    if (!navigator.geolocation) {
+      setMapAddError("Your browser doesn't support location services — search or tap the map instead.");
+      return;
+    }
+    setMapAddStatus("locating");
+    setMapAddError("");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => addLocationFromLatLng(pos.coords.latitude, pos.coords.longitude),
+      () => {
+        setMapAddStatus("");
+        setMapAddError("Couldn't get your current location — search or tap the map instead.");
+      },
+      { timeout: 10000 }
+    );
+  }
+
+  function removeLocation(id) {
+    if (locations.length <= 1) return;
+    if (!window.confirm("Remove this location? Its species guide will be forgotten, but sightings already logged there stay in your data.")) return;
+    const remaining = locations.filter((l) => l.id !== id);
+    setLocations(remaining);
+    if (user) locationsCol(user.uid).doc(id).delete().catch(() => {});
+    setLocationSpeciesCache((prev) => { const next = { ...prev }; delete next[id]; return next; });
+    setLocationStatus((prev) => { const next = { ...prev }; delete next[id]; return next; });
+    if (activeLocationId === id) setActiveLocationId(remaining[0].id);
+  }
+
+  const visibleEntries = useMemo(() => {
+    return entries.filter((e) => e.locationId === activeLocationId || (!e.locationId && activeLocationId === "default"));
+  }, [entries, activeLocationId]);
+
+  const spotTags = useMemo(() => {
+    const s = new Set(visibleEntries.map((e) => e.location).filter(Boolean));
+    return Array.from(s).sort();
+  }, [visibleEntries]);
+
+  const filtered = useMemo(() => {
+    return visibleEntries
+      .filter((e) => {
+        if (search && !e.species.toLowerCase().includes(search.toLowerCase())) return false;
+        if (filterCategory !== "all" && e.category !== filterCategory) return false;
+        if (filterLocation !== "all" && e.location !== filterLocation) return false;
+        if (dateFrom && e.date < dateFrom) return false;
+        if (dateTo && e.date > dateTo) return false;
+        return true;
+      })
+      .sort((a, b) => (a.date < b.date ? 1 : -1));
+  }, [visibleEntries, search, filterCategory, filterLocation, dateFrom, dateTo]);
+
+  const speciesSummary = useMemo(() => {
+    const map = new Map();
+    visibleEntries.forEach((e) => {
+      const key = e.species.trim().toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, { species: e.species.trim(), category: e.category, sightings: 0, totalQty: 0, firstSeen: e.date, lastSeen: e.date });
+      }
+      const rec = map.get(key);
+      rec.sightings += 1;
+      rec.totalQty += Number(e.quantity) || 0;
+      if (e.date < rec.firstSeen) rec.firstSeen = e.date;
+      if (e.date > rec.lastSeen) rec.lastSeen = e.date;
+    });
+    return Array.from(map.values()).sort((a, b) => b.sightings - a.sightings);
+  }, [visibleEntries]);
+
+  const stats = useMemo(() => {
+    const uniqueSpecies = speciesSummary.length;
+    const totalSightings = visibleEntries.length;
+    const categoriesUsed = new Set(visibleEntries.map((e) => e.category)).size;
+    return { uniqueSpecies, totalSightings, categoriesUsed };
+  }, [visibleEntries, speciesSummary]);
+
+  const categoryChartData = useMemo(() => {
+    return CATEGORIES.map((c) => ({ name: c.label, value: speciesSummary.filter((s) => s.category === c.id).length, color: c.color }))
+      .filter((d) => d.value > 0);
+  }, [speciesSummary]);
+
+  const monthlyChartData = useMemo(() => {
+    const seenSpecies = new Set();
+    const monthMap = new Map();
+    const sorted = [...visibleEntries].sort((a, b) => (a.date < b.date ? -1 : 1));
+    sorted.forEach((e) => {
+      const key = e.species.trim().toLowerCase();
+      const month = e.date.slice(0, 7);
+      if (!seenSpecies.has(key)) {
+        seenSpecies.add(key);
+        monthMap.set(month, (monthMap.get(month) || 0) + 1);
+      }
+    });
+    return Array.from(monthMap.entries()).sort(([a], [b]) => (a < b ? -1 : 1)).map(([month, newSpecies]) => ({ month, newSpecies }));
+  }, [visibleEntries]);
+
+  const availableYears = useMemo(() => {
+    const years = new Set(visibleEntries.map((e) => e.date.slice(0, 4)));
+    years.add(todayStr().slice(0, 4));
+    return Array.from(years).sort((a, b) => b.localeCompare(a));
+  }, [visibleEntries]);
+
+  const resetPreviewCount = useMemo(() => {
+    if (resetScope === "all") return visibleEntries.length;
+    if (resetScope === "month") return visibleEntries.filter((e) => e.date.slice(0, 7) === resetMonth).length;
+    if (resetScope === "year") return visibleEntries.filter((e) => e.date.slice(0, 4) === resetYear).length;
+    return 0;
+  }, [visibleEntries, resetScope, resetMonth, resetYear]);
+
+  function handleScopedReset() {
+    if (resetPreviewCount === 0 || !activeLocation) return;
+    const label = resetScope === "all" ? "all time" : resetScope === "month" ? resetMonth : resetYear;
+    if (!window.confirm("Delete " + resetPreviewCount + " sighting(s) logged in " + activeLocation.name + " for " + label + "? This can't be undone.")) return;
+    const removedIds = [];
+    setEntries((prev) => prev.filter((e) => {
+      const sameLocation = e.locationId === activeLocationId || (!e.locationId && activeLocationId === "default");
+      if (!sameLocation) return true;
+      let matches;
+      if (resetScope === "all") matches = true;
+      else if (resetScope === "month") matches = e.date.slice(0, 7) === resetMonth;
+      else if (resetScope === "year") matches = e.date.slice(0, 4) === resetYear;
+      else matches = false;
+      if (matches) removedIds.push(e.id);
+      return !matches;
+    }));
+    if (user && removedIds.length) {
+      const batch = db.batch();
+      removedIds.forEach((eid) => batch.delete(entriesCol(user.uid).doc(eid)));
+      batch.commit().catch(() => {});
+    }
+  }
+
+  async function resetAllData() {
+    if (confirmResetText.trim().toUpperCase() !== "RESET") return;
+    try {
+      localStorage.removeItem(STORAGE_KEYS.entries);
+      localStorage.removeItem(STORAGE_KEYS.locations);
+      localStorage.removeItem(STORAGE_KEYS.activeLocation);
+    } catch (err) { /* ignore */ }
+    if (user) {
+      try {
+        const cloud = await pullCloudData(user.uid);
+        const batch = db.batch();
+        cloud.entries.forEach((e) => batch.delete(entriesCol(user.uid).doc(e.id)));
+        cloud.locations.forEach((l) => batch.delete(locationsCol(user.uid).doc(l.id)));
+        await batch.commit();
+      } catch (err) { /* ignore — local wipe still succeeds */ }
+    }
+    setEntries([]);
+    setLocations([]);
+    setLocationSpeciesCache({});
+    setLocationStatus({});
+    setActiveLocationId(null);
+    setConfirmResetText("");
+    setTab("log");
+  }
+
+  async function syncOnSignIn(uid) {
+    setSyncStatus("syncing");
+    try {
+      const cloud = await pullCloudData(uid);
+      const mergedEntries = mergeById(entries, cloud.entries);
+      const mergedLocations = mergeById(locations, cloud.locations).map((l) => (l.updatedAt ? l : { ...l, updatedAt: nowTs() }));
+      setEntries(mergedEntries);
+      if (mergedLocations.length) setLocations(mergedLocations);
+
+      const cloudEntryIds = new Set(cloud.entries.map((e) => e.id));
+      const cloudLocationIds = new Set(cloud.locations.map((l) => l.id));
+      const finalLocations = mergedLocations.length ? mergedLocations : locations;
+      const batch = db.batch();
+      let ops = 0;
+      mergedEntries.forEach((e) => {
+        if (!cloudEntryIds.has(e.id)) { batch.set(entriesCol(uid).doc(e.id), e); ops++; }
+      });
+      finalLocations.forEach((l) => {
+        if (!cloudLocationIds.has(l.id)) { batch.set(locationsCol(uid).doc(l.id), l); ops++; }
+      });
+      if (ops > 0) await batch.commit();
+      setSyncStatus("done");
+    } catch (err) {
+      setSyncStatus("error");
+    }
+  }
+
+  async function refreshSocialData(uid) {
+    try {
+      const [outSnap, inSnap, fromSnap, toSnap] = await Promise.all([
+        db.collection("friendRequests").where("from", "==", uid).where("status", "==", "pending").get(),
+        db.collection("friendRequests").where("to", "==", uid).where("status", "==", "pending").get(),
+        db.collection("friendRequests").where("from", "==", uid).where("status", "==", "accepted").get(),
+        db.collection("friendRequests").where("to", "==", uid).where("status", "==", "accepted").get(),
+      ]);
+      setOutgoingRequests(outSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setIncomingRequests(inSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      const otherUids = Array.from(new Set([
+        ...fromSnap.docs.map((d) => d.data().to),
+        ...toSnap.docs.map((d) => d.data().from),
+      ]));
+      const friendDocs = await Promise.all(otherUids.map((otherUid) => db.collection("users").doc(otherUid).get()));
+      setFriends(friendDocs.filter((d) => d.exists).map((d) => ({ uid: d.id, ...d.data() })));
+    } catch (err) {
+      setFriendError("Couldn't load friend data — try refreshing.");
+    }
+  }
+
+  function friendlyAuthError(err) {
+    const code = err && err.code;
+    if (code === "auth/email-already-in-use") return "That email already has an account — try signing in instead.";
+    if (code === "auth/invalid-email") return "That doesn't look like a valid email.";
+    if (code === "auth/weak-password") return "Password should be at least 6 characters.";
+    if (code === "auth/wrong-password" || code === "auth/user-not-found" || code === "auth/invalid-credential") return "Email or password didn't match.";
+    return "Something went wrong — try again.";
+  }
+
+  async function handleAuthSubmit(e) {
+    e.preventDefault();
+    setAuthError("");
+    setAuthBusy(true);
+    try {
+      if (authMode === "signup") {
+        const cred = await auth.createUserWithEmailAndPassword(authEmail.trim(), authPassword);
+        if (authDisplayName.trim()) {
+          await cred.user.updateProfile({ displayName: authDisplayName.trim() });
+        }
+        await db.collection("users").doc(cred.user.uid).set({
+          email: normalizeEmail(authEmail),
+          displayName: authDisplayName.trim() || authEmail.trim(),
+          stats: globalStats,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      } else {
+        await auth.signInWithEmailAndPassword(authEmail.trim(), authPassword);
+      }
+      setAuthPassword("");
+    } catch (err) {
+      setAuthError(friendlyAuthError(err));
+    }
+    setAuthBusy(false);
+  }
+
+  function signOutUser() {
+    auth.signOut();
+  }
+
+  function handleForgotPassword() {
+    const email = authEmail.trim();
+    if (!email) {
+      setAuthError("Type your email above first, then tap \"Forgot password?\" again.");
+      return;
+    }
+    setAuthError("");
+    setAuthBusy(true);
+    auth.sendPasswordResetEmail(email)
+      .then(() => setAuthError("Reset email sent — check your inbox (and spam folder) for a link."))
+      .catch(() => setAuthError("Couldn't send a reset email for that address."))
+      .finally(() => setAuthBusy(false));
+  }
+
+  async function sendFriendRequest(e) {
+    e.preventDefault();
+    if (!user) return;
+    const email = normalizeEmail(friendEmail);
+    if (!email) return;
+    if (email === normalizeEmail(user.email)) { setFriendError("That's your own email."); return; }
+    setFriendBusy(true);
+    setFriendError("");
+    try {
+      const targetSnap = await db.collection("users").where("email", "==", email).limit(1).get();
+      if (targetSnap.empty) {
+        setFriendError("No account found with that email.");
+        setFriendBusy(false);
+        return;
+      }
+      const targetUid = targetSnap.docs[0].id;
+      const reverseId = targetUid + "_" + user.uid;
+      const reverseDoc = await db.collection("friendRequests").doc(reverseId).get();
+      if (reverseDoc.exists && reverseDoc.data().status === "pending") {
+        await db.collection("friendRequests").doc(reverseId).update({ status: "accepted" });
+        setFriendEmail("");
+        await refreshSocialData(user.uid);
+        setFriendBusy(false);
+        return;
+      }
+      const forwardId = user.uid + "_" + targetUid;
+      const existing = await db.collection("friendRequests").doc(forwardId).get();
+      if (existing.exists && existing.data().status === "accepted") {
+        setFriendError("You're already friends.");
+        setFriendBusy(false);
+        return;
+      }
+      if (existing.exists && existing.data().status === "pending") {
+        setFriendError("Friend request already sent.");
+        setFriendBusy(false);
+        return;
+      }
+      await db.collection("friendRequests").doc(forwardId).set({
+        from: user.uid,
+        to: targetUid,
+        fromEmail: normalizeEmail(user.email),
+        toEmail: email,
+        status: "pending",
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      setFriendEmail("");
+      await refreshSocialData(user.uid);
+    } catch (err) {
+      setFriendError("Something went wrong sending that request.");
+    }
+    setFriendBusy(false);
+  }
+
+  async function respondToRequest(reqId, accept) {
+    try {
+      await db.collection("friendRequests").doc(reqId).update({ status: accept ? "accepted" : "declined" });
+      await refreshSocialData(user.uid);
+    } catch (err) {
+      setFriendError("Couldn't update that request.");
+    }
+  }
+
+  const globalStats = useMemo(() => {
+    const set = new Set();
+    entries.forEach((e) => set.add(e.species.trim().toLowerCase()));
+    return { uniqueSpecies: set.size, totalSightings: entries.length };
+  }, [entries]);
+
+  const leaderboard = useMemo(() => {
+    const rows = [{ uid: user ? user.uid : "you", name: "You", uniqueSpecies: globalStats.uniqueSpecies, totalSightings: globalStats.totalSightings, isYou: true }];
+    friends.forEach((f) => rows.push({
+      uid: f.uid,
+      name: f.displayName || f.email || "Friend",
+      uniqueSpecies: (f.stats && f.stats.uniqueSpecies) || 0,
+      totalSightings: (f.stats && f.stats.totalSightings) || 0,
+      isYou: false,
+    }));
+    return rows.sort((a, b) => b.uniqueSpecies - a.uniqueSpecies);
+  }, [user, globalStats, friends]);
+
+  React.useEffect(() => {
+    if (!user) return;
+    db.collection("users").doc(user.uid).set({
+      email: normalizeEmail(user.email),
+      displayName: user.displayName || user.email,
+      stats: globalStats,
+      statsUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true }).catch(() => {});
+  }, [user, globalStats.uniqueSpecies, globalStats.totalSightings]);
+
+  // ---- milestone celebration ----
+  const prevUniqueRef = React.useRef(null);
+  React.useEffect(() => { prevUniqueRef.current = null; }, [activeLocationId]);
+  React.useEffect(() => {
+    if (prevUniqueRef.current === null) { prevUniqueRef.current = stats.uniqueSpecies; return; }
+    const prev = prevUniqueRef.current;
+    const curr = stats.uniqueSpecies;
+    if (curr > prev) {
+      const crossed = MILESTONES.find((m) => prev < m && curr >= m);
+      if (crossed) {
+        setToast(crossed + " species logged at " + (activeLocation ? activeLocation.name : "this location") + "!");
+        setTimeout(() => setToast(null), 4500);
+      }
+    }
+    prevUniqueRef.current = curr;
+  }, [stats.uniqueSpecies]);
+
+  function updateForm(field, value) { setForm((f) => ({ ...f, [field]: value })); }
+
+  function handlePhotoChange(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    resizePhoto(file).then((dataUrl) => updateForm("photo", dataUrl)).catch(() => {});
+    e.target.value = "";
+  }
+
+  function addEntry(e) {
+    e.preventDefault();
+    if (!form.species.trim()) return;
+    const entry = {
+      id: uid(), species: form.species.trim(), category: form.category, date: form.date || todayStr(),
+      quantity: Math.max(1, Number(form.quantity) || 1), location: form.location.trim(), note: form.note.trim(),
+      photo: form.photo || null, locationId: activeLocationId, locationName: activeLocation.name,
+      updatedAt: nowTs(),
+    };
+    setEntries((prev) => [entry, ...prev]);
+    if (user) entriesCol(user.uid).doc(entry.id).set(entry).catch(() => {});
+    setForm({ ...emptyForm, category: form.category, location: form.location });
+  }
+
+  function removeEntry(id) {
+    if (!window.confirm("Remove this sighting? This can't be undone.")) return;
+    setEntries((prev) => prev.filter((e) => e.id !== id));
+    if (user) entriesCol(user.uid).doc(id).delete().catch(() => {});
+  }
+
+  function triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function exportJSON() {
+    const blob = new Blob([JSON.stringify(entries, null, 2)], { type: "application/json" });
+    triggerDownload(blob, "backyard-field-log.json");
+  }
+
+  function csvEscape(v) {
+    const s = String(v ?? "");
+    if (s.includes(",") || s.includes('"') || s.includes("\n")) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  }
+
+  function exportCSV() {
+    const header = ["species", "category", "date", "quantity", "location", "note"];
+    const rows = entries.map((e) => header.map((h) => csvEscape(e[h])).join(","));
+    const csv = [header.join(","), ...rows].join("\n");
+    triggerDownload(new Blob([csv], { type: "text/csv" }), "backyard-field-log.csv");
+  }
+
+  function handleImport(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setImportError("");
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (!Array.isArray(data)) throw new Error("bad format");
+        const cleaned = data.filter((d) => d && d.species).map((d) => ({
+          id: d.id || uid(),
+          species: String(d.species),
+          category: CATEGORIES.some((c) => c.id === d.category) ? d.category : "other",
+          date: d.date || todayStr(),
+          quantity: Number(d.quantity) || 1,
+          location: d.location || "",
+          note: d.note || "",
+          photo: d.photo || null,
+          locationId: d.locationId || activeLocationId,
+          locationName: d.locationName || activeLocation.name,
+          updatedAt: d.updatedAt || nowTs(),
+        }));
+        setEntries((prev) => [...cleaned, ...prev]);
+        if (user && cleaned.length) {
+          const batch = db.batch();
+          cleaned.forEach((c) => batch.set(entriesCol(user.uid).doc(c.id), c));
+          batch.commit().catch(() => {});
+        }
+      } catch (err) {
+        setImportError("Couldn't read that file. Import a JSON export from this app.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
+  const maxMonthly = Math.max(1, ...monthlyChartData.map((d) => d.newSpecies));
+
+  if (needsLocation) {
+    return (
+      <div style={styles.onboardingWrap}>
+        <div style={styles.onboardingCard}>
+          <p style={styles.eyebrow}>WELCOME</p>
+          <h1 className="ffont" style={styles.title}>Backyard Species Log</h1>
+          <p style={{ ...styles.locationNote, marginTop: 10 }}>
+            Before you start logging, tell us where you'll be tracking from — it tailors your species guide and suggestions to your area.
+          </p>
+
+          <button
+            type="button"
+            style={{ ...styles.primaryButtonWide, marginTop: 18 }}
+            onClick={useMyLocation}
+            disabled={mapAddStatus === "locating"}
+          >
+            <PinIcon size={15} /> {mapAddStatus === "locating" ? "Locating…" : "Use my current location"}
+          </button>
+
+          <p style={styles.onboardingDivider}>or</p>
+
+          <form onSubmit={addLocation}>
+            <Field label="City and state, or zip code">
+              <input
+                style={styles.input}
+                placeholder="e.g. Asheville, NC"
+                value={newLocationQuery}
+                onChange={(e) => setNewLocationQuery(e.target.value)}
+                required
+              />
+            </Field>
+            <button type="submit" style={styles.primaryButtonWide} disabled={addingLocation}>
+              {addingLocation ? "Adding…" : "+ Set this location"}
+            </button>
+            {addLocationError && <p style={styles.errorText}>{addLocationError}</p>}
+          </form>
+
+          <p style={styles.onboardingDivider}>or tap the map</p>
+
+          <LocationsMap
+            locations={[]}
+            activeLocationId={null}
+            onSelect={() => {}}
+            onMapClick={addLocationFromLatLng}
+            addPin={mapPin}
+          />
+          {mapAddStatus === "locating" && (
+            <p style={{ ...styles.suggestLabel, marginTop: 10 }}>Adding that spot{"…"}</p>
+          )}
+          {mapAddError && <p style={{ ...styles.errorText, marginTop: 10, marginBottom: 0 }}>{mapAddError}</p>}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {toast && (
+        <div style={styles.toast}>
+          <span style={styles.toastAccent} />
+          <span>{toast}</span>
+        </div>
+      )}
+
+      <header style={styles.header}>
+        <div>
+          <p style={styles.eyebrow}>{"FIELD LOG · " + activeLocation.name.toUpperCase()}</p>
+          <h1 className="ffont" style={styles.title}>Backyard Species Log</h1>
+        </div>
+        <div style={styles.headerActions}>
+          <button
+            type="button"
+            style={styles.iconButton}
+            onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
+            title="Toggle dark mode"
+            aria-label="Toggle dark mode"
+          >
+            {theme === "light" ? <MoonIcon /> : <SunIcon />}
+          </button>
+          <label style={{ ...styles.iconButton, borderColor: "#2B7A9455", color: "#1F5F73" }}>
+            Import
+            <input type="file" accept="application/json" onChange={handleImport} style={{ display: "none" }} />
+          </label>
+          <div style={{ position: "relative" }}>
+            <button type="button" style={styles.primaryButton} onClick={() => setExportOpen((o) => !o)}>
+              Export {"▾"}
+            </button>
+            {exportOpen && (
+              <div style={styles.exportMenu}>
+                <button type="button" style={styles.exportMenuItem} onClick={() => { exportJSON(); setExportOpen(false); }}>Export as JSON</button>
+                <button type="button" style={styles.exportMenuItem} onClick={() => { exportCSV(); setExportOpen(false); }}>Export as CSV</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+      {importError && <p style={styles.errorText}>{importError}</p>}
+      {storageError && <p style={styles.errorText}>{storageError}</p>}
+
+      <div style={styles.statsRow}>
+        <StatCard label="Unique species" value={stats.uniqueSpecies} accent="#2B7A94" />
+        <StatCard label="Total sightings" value={stats.totalSightings} accent="#B5651D" />
+        <StatCard label="Categories represented" value={stats.categoriesUsed + " / " + CATEGORIES.length} accent="#1F8A68" />
+      </div>
+
+      <div style={styles.badgeRow} title="Species milestones for this location">
+        {MILESTONES.map((m) => {
+          const earned = stats.uniqueSpecies >= m;
+          return <span key={m} style={{ ...styles.badgePill, ...(earned ? styles.badgePillEarned : {}) }}>{m}</span>;
+        })}
+      </div>
+
+      <nav className="tabs-nav" style={styles.tabs}>
+        <TabButton label="Log" active={tab === "log"} onClick={() => setTab("log")} accent="#2E6B3E" />
+        <TabButton label="Species" active={tab === "species"} onClick={() => setTab("species")} accent="#2B7A94" />
+        <TabButton label="Guide" active={tab === "guide"} onClick={() => setTab("guide")} accent="#7A4F94" />
+        <TabButton label="Location" active={tab === "location"} onClick={() => setTab("location")} accent="#1F8A68" />
+        <TabButton label="Insights" active={tab === "insights"} onClick={() => setTab("insights")} accent="#B5651D" />
+        <TabButton label="Account" active={tab === "account"} onClick={() => setTab("account")} accent="#54606B" />
+      </nav>
+
+      {locations.length > 1 && (tab === "log" || tab === "species" || tab === "insights" || tab === "account") && (
+        <div style={styles.locationSwitchBar}>
+          <span>Logging for</span>
+          <select
+            style={styles.locationSwitchSelect}
+            value={activeLocationId}
+            onChange={(e) => setActiveLocationId(e.target.value)}
+          >
+            {locations.map((loc) => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
+          </select>
+        </div>
+      )}
+
+      {tab === "log" && (
+        <React.Fragment>
+          <div style={styles.card}>
+            <button style={styles.formToggle} onClick={() => setShowForm((s) => !s)}>
+              <span className="ffont" style={{ fontSize: 17 }}>+ Log a sighting</span>
+              <span style={{ marginLeft: "auto" }}>{showForm ? "−" : "+"}</span>
+            </button>
+            {showForm && (
+              <form onSubmit={addEntry} style={styles.form}>
+                <div style={styles.formGrid}>
+                  <Field label="Species">
+                    <input style={styles.input} placeholder="e.g. Carolina wren" value={form.species}
+                      onChange={(e) => updateForm("species", e.target.value)} required />
+                  </Field>
+                  <Field label="Category">
+                    <select style={styles.input} value={form.category} onChange={(e) => updateForm("category", e.target.value)}>
+                      {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.glyph} {c.label}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Date">
+                    <input type="date" style={styles.input} value={form.date} onChange={(e) => updateForm("date", e.target.value)} />
+                  </Field>
+                  <Field label="Quantity">
+                    <input type="number" min="1" style={styles.input} value={form.quantity} onChange={(e) => updateForm("quantity", e.target.value)} />
+                  </Field>
+                  <Field label="Location on property">
+                    <input style={styles.input} placeholder="e.g. back fence, garden bed" list="location-suggestions"
+                      value={form.location} onChange={(e) => updateForm("location", e.target.value)} />
+                    <datalist id="location-suggestions">
+                      {spotTags.map((l) => <option key={l} value={l} />)}
+                    </datalist>
+                  </Field>
+                </div>
+                {locationStatus[activeLocationId] === "loading" && (
+                  <p style={styles.suggestLabel}>Loading species suggestions for {activeLocation.name}{"…"}</p>
+                )}
+                {locationStatus[activeLocationId] === "error" && (
+                  <p style={styles.errorText}>
+                    Couldn't load suggestions for this location.{" "}
+                    <button type="button" style={styles.retryLink} onClick={() => retryLocationSpecies(activeLocation)}>Retry</button>
+                  </p>
+                )}
+                {(speciesForActive[form.category] || []).length > 0 && (
+                  <div style={styles.suggestWrap}>
+                    <span style={styles.suggestLabel}>Common in {activeLocation.name} {"—"} tap the i to preview:</span>
+                    <div style={styles.chipRow}>
+                      {speciesForActive[form.category].map((name) => {
+                        const active = form.species === name;
+                        const c = catMeta(form.category).color;
+                        return (
+                          <div
+                            key={name}
+                            style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 4 }}
+                            onMouseEnter={() => setPreviewSpecies(name)}
+                            onMouseLeave={() => setPreviewSpecies((h) => (h === name ? null : h))}
+                          >
+                            <button
+                              type="button"
+                              style={{
+                                ...styles.chip,
+                                borderColor: c + "50",
+                                color: active ? "#FFFFFF" : c,
+                                background: active ? c : c + "14",
+                              }}
+                              onClick={() => updateForm("species", name)}
+                            >
+                              {name}
+                            </button>
+                            <button
+                              type="button"
+                              style={{ ...styles.miniInfoButton, borderColor: c + "70", color: c }}
+                              onClick={() => setPreviewSpecies((p) => (p === name ? null : name))}
+                              aria-label={"Preview " + name}
+                              title={"Preview " + name}
+                            >i</button>
+                            {previewSpecies === name && <SpeciesHoverPopup name={name} categoryId={form.category} />}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                <div style={styles.formGrid}>
+                  <Field label="Note (optional)">
+                    <input style={styles.input} placeholder="What it looked like, behavior, etc." value={form.note}
+                      onChange={(e) => updateForm("note", e.target.value)} />
+                  </Field>
+                  <Field label="Photo (optional)">
+                    <input type="file" accept="image/*" capture="environment" style={styles.input} onChange={handlePhotoChange} />
+                  </Field>
+                </div>
+                {form.photo && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+                    <img src={form.photo} alt="Sighting preview" style={styles.photoPreview} />
+                    <button type="button" style={styles.retryLink} onClick={() => updateForm("photo", "")}>Remove photo</button>
+                  </div>
+                )}
+                <button type="submit" style={styles.primaryButtonWide}>+ Add sighting</button>
+              </form>
+            )}
+          </div>
+
+          <div style={styles.filterBar}>
+            <div style={styles.searchBox}>
+              <input style={styles.searchInput} placeholder="Search species..." value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+            <select style={styles.filterSelect} value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
+              <option value="all">All categories</option>
+              {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+            <select style={styles.filterSelect} value={filterLocation} onChange={(e) => setFilterLocation(e.target.value)}>
+              <option value="all">All spots</option>
+              {spotTags.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+            <input type="date" style={styles.filterSelect} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="From date" />
+            <input type="date" style={styles.filterSelect} value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="To date" />
+          </div>
+
+          <div style={styles.entryList}>
+            {filtered.length === 0 && (
+              <p style={styles.emptyText}>
+                {entries.length === 0 ? "No sightings logged yet. Add your first observation above." : "No sightings match these filters."}
+              </p>
+            )}
+            {filtered.map((e) => {
+              const meta = catMeta(e.category);
+              return (
+                <div key={e.id} style={{ ...styles.entryRow, borderLeft: "4px solid " + meta.color }}>
+                  <div style={{ ...styles.entryIcon, background: e.photo ? "transparent" : meta.color + "1F", padding: e.photo ? 0 : undefined, overflow: "hidden" }}>
+                    {e.photo ? <img src={e.photo} alt="" style={styles.entryPhoto} /> : <CategoryIcon id={e.category} color={meta.color} size={18} />}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={styles.entryTop}>
+                      <span className="ffont" style={styles.entrySpecies}>{e.species}</span>
+                      <span style={styles.entryQty}>x{e.quantity}</span>
+                    </div>
+                    <div style={styles.entryMeta}>
+                      <span>{e.date}</span>
+                      {e.location && <span>· {e.location}</span>}
+                    </div>
+                    {e.note && <p style={styles.entryNote}>{e.note}</p>}
+                  </div>
+                  <button style={styles.deleteButton} onClick={() => removeEntry(e.id)} title="Remove entry" aria-label="Remove entry">×</button>
+                </div>
+              );
+            })}
+          </div>
+        </React.Fragment>
+      )}
+
+      {tab === "species" && (
+        <div style={styles.card}>
+          {speciesSummary.length === 0 ? (
+            <p style={styles.emptyText}>No species logged yet.</p>
+          ) : (
+            <div>
+              <div style={styles.speciesHeaderRow}>
+                <span style={{ flex: 2 }}>Species</span>
+                <span style={{ flex: 1, textAlign: "right" }}>Sightings</span>
+                <span style={{ flex: 1, textAlign: "right" }}>Total seen</span>
+                <span style={{ flex: 1.4 }}>First / last seen</span>
+                <span style={{ flex: "0 0 28px" }}></span>
+              </div>
+              {speciesSummary.map((s) => {
+                const meta = catMeta(s.category);
+                const isOpen = expandedSpecies === s.species;
+                return (
+                  <div key={s.species}>
+                    <div style={styles.speciesRow}>
+                      <div style={{ flex: 2, display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                        <CategoryIcon id={s.category} color={meta.color} size={16} />
+                        <span className="ffont" style={{ fontSize: 15 }}>{s.species}</span>
+                      </div>
+                      <span className="mfont" style={{ flex: 1, textAlign: "right", fontSize: 13 }}>{s.sightings}</span>
+                      <span className="mfont" style={{ flex: 1, textAlign: "right", fontSize: 13 }}>{s.totalQty}</span>
+                      <span style={{ flex: 1.4, fontSize: 12, color: "var(--text-muted)" }}>{s.firstSeen} — {s.lastSeen}</span>
+                      <button
+                        type="button"
+                        style={{ ...styles.infoLink, ...(isOpen ? styles.infoLinkActive : {}) }}
+                        onClick={() => setExpandedSpecies(isOpen ? null : s.species)}
+                        title="Show species info"
+                      >i</button>
+                    </div>
+                    {isOpen && (
+                      <div style={styles.expandedPanel}>
+                        <SpeciesInfoCard name={s.species} categoryId={s.category} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "guide" && (
+        <div>
+          <p style={styles.locationNote}>Species guide for <strong>{activeLocation.name}</strong>.</p>
+          {locationStatus[activeLocationId] === "loading" && (
+            <p style={styles.emptyText}>Loading species for this location{"…"}</p>
+          )}
+          {locationStatus[activeLocationId] === "error" && (
+            <p style={styles.errorText}>
+              Couldn't load species for this location.{" "}
+              <button type="button" style={styles.retryLink} onClick={() => retryLocationSpecies(activeLocation)}>Retry</button>
+            </p>
+          )}
+          {CATEGORIES.filter((c) => (speciesForActive[c.id] || []).length > 0).map((c) => (
+            <div key={c.id} style={styles.card}>
+              <h3 className="ffont" style={{ ...styles.chartTitle, display: "flex", alignItems: "center", gap: 8 }}>
+                <CategoryIcon id={c.id} color={c.color} size={18} /> {c.label}
+              </h3>
+              <div style={styles.guideGrid}>
+                {speciesForActive[c.id].map((name) => (
+                  <SpeciesInfoCard key={name} name={name} categoryId={c.id} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === "location" && (
+        <div>
+          <div style={styles.card}>
+            <h3 className="ffont" style={styles.chartTitle}>Map</h3>
+            <p style={styles.locationNote}>Tap a pin to switch locations, or tap anywhere else on the map to add a new location right there.</p>
+            <LocationsMap
+              locations={locations}
+              activeLocationId={activeLocationId}
+              onSelect={setActiveLocationId}
+              onMapClick={addLocationFromLatLng}
+              addPin={mapPin}
+            />
+            {mapAddStatus === "locating" && (
+              <p style={{ ...styles.suggestLabel, marginTop: 10 }}>Adding that spot{"…"}</p>
+            )}
+            {mapAddError && <p style={{ ...styles.errorText, marginTop: 10, marginBottom: 0 }}>{mapAddError}</p>}
+          </div>
+
+          <div style={styles.card}>
+            <h3 className="ffont" style={styles.chartTitle}>Your locations</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {locations.map((loc) => {
+                const isActive = loc.id === activeLocationId;
+                const status = locationStatus[loc.id];
+                const count = entries.filter((e) => e.locationId === loc.id || (!e.locationId && loc.id === "default")).length;
+                return (
+                  <div key={loc.id} style={{ ...styles.entryRow, borderLeft: "4px solid " + (isActive ? "#1F8A68" : "var(--border)") }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={styles.entryTop}>
+                        <span className="ffont" style={styles.entrySpecies}>{loc.name}</span>
+                        {isActive && <span style={{ fontSize: 12, fontWeight: 700, color: "#1F8A68" }}>Active</span>}
+                      </div>
+                      <div style={styles.entryMeta}>
+                        <span>{count} sighting{count === 1 ? "" : "s"} logged</span>
+                        {status === "loading" && <span>Loading species{"…"}</span>}
+                        {status === "error" && <span style={{ color: "#A8455F" }}>Species failed to load</span>}
+                      </div>
+                    </div>
+                    {!isActive && (
+                      <button type="button" style={styles.iconButton} onClick={() => setActiveLocationId(loc.id)}>Switch here</button>
+                    )}
+                    {status === "error" && (
+                      <button type="button" style={styles.iconButton} onClick={() => retryLocationSpecies(loc)}>Retry</button>
+                    )}
+                    {locations.length > 1 && (
+                      <button type="button" style={styles.deleteButton} onClick={() => removeLocation(loc.id)} title="Remove location" aria-label="Remove location">{"×"}</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={styles.card}>
+            <h3 className="ffont" style={styles.chartTitle}>Add a location</h3>
+            <p style={styles.locationNote}>Search by name below, or just tap the map above to drop a pin.</p>
+            <form onSubmit={addLocation}>
+              <div style={styles.formGrid}>
+                <Field label="Label (optional)">
+                  <input
+                    style={styles.input}
+                    placeholder="e.g. Lake house"
+                    value={newLocationName}
+                    onChange={(e) => setNewLocationName(e.target.value)}
+                  />
+                </Field>
+                <Field label="City and state, or zip code">
+                  <input
+                    style={styles.input}
+                    placeholder="e.g. Asheville, NC"
+                    value={newLocationQuery}
+                    onChange={(e) => setNewLocationQuery(e.target.value)}
+                    required
+                  />
+                </Field>
+              </div>
+              <button type="submit" style={styles.primaryButtonWide} disabled={addingLocation}>
+                {addingLocation ? "Adding…" : "+ Add location"}
+              </button>
+              {addLocationError && <p style={styles.errorText}>{addLocationError}</p>}
+            </form>
+          </div>
+        </div>
+      )}
+
+      {tab === "insights" && (
+        <div>
+          <div style={styles.card}>
+            <h3 className="ffont" style={styles.chartTitle}>Species by category</h3>
+            {categoryChartData.length === 0 ? (
+              <p style={styles.emptyText}>Log some sightings to see this chart.</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {categoryChartData.map((d) => {
+                  const max = Math.max(...categoryChartData.map((x) => x.value));
+                  return (
+                    <div key={d.name} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ width: 150, fontSize: 12.5, color: "var(--text)", flexShrink: 0 }}>{d.name}</span>
+                      <div style={{ flex: 1, background: "var(--border-soft)", borderRadius: 6, height: 14, overflow: "hidden" }}>
+                        <div style={{ width: (d.value / max * 100) + "%", background: d.color, height: "100%" }} />
+                      </div>
+                      <span className="mfont" style={{ fontSize: 12.5, color: "var(--text-muted)", width: 20, textAlign: "right" }}>{d.value}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div style={styles.card}>
+            <h3 className="ffont" style={styles.chartTitle}>New species discovered by month</h3>
+            {monthlyChartData.length === 0 ? (
+              <p style={styles.emptyText}>Log some sightings to see this chart.</p>
+            ) : (
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 160, paddingTop: 10 }}>
+                {monthlyChartData.map((d) => (
+                  <div key={d.month} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, height: "100%", justifyContent: "flex-end" }}>
+                    <span className="mfont" style={{ fontSize: 11, color: "var(--text-muted)" }}>{d.newSpecies}</span>
+                    <div style={{ width: "70%", background: "#2E6B3E", borderRadius: "4px 4px 0 0", height: (d.newSpecies / maxMonthly * 100) + "%", minHeight: 4 }} />
+                    <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>{d.month}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === "account" && (
+        <div>
+          <div style={styles.card}>
+            <h3 className="ffont" style={styles.chartTitle}>Account</h3>
+            {authLoading ? (
+              <p style={styles.emptyText}>Loading…</p>
+            ) : user ? (
+              <div>
+                <p style={styles.locationNote}>Signed in as <strong>{user.displayName || user.email}</strong> ({user.email}).</p>
+                <p style={styles.suggestLabel}>
+                  {syncStatus === "syncing" && "Syncing your sightings to your account…"}
+                  {syncStatus === "done" && "Your sightings and locations are backed up to your account."}
+                  {syncStatus === "error" && "Couldn't sync just now — check your connection and try again."}
+                  {syncStatus === "" && "Not synced yet this session."}
+                </p>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button type="button" style={styles.iconButton} onClick={signOutUser}>Sign out</button>
+                  <button type="button" style={styles.iconButton} onClick={() => syncOnSignIn(user.uid)}>Sync now</button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div style={styles.authTabRow}>
+                  <button
+                    type="button"
+                    style={{ ...styles.authTabButton, ...(authMode === "signin" ? styles.authTabButtonActive : {}) }}
+                    onClick={() => { setAuthMode("signin"); setAuthError(""); }}
+                  >Sign in</button>
+                  <button
+                    type="button"
+                    style={{ ...styles.authTabButton, ...(authMode === "signup" ? styles.authTabButtonActive : {}) }}
+                    onClick={() => { setAuthMode("signup"); setAuthError(""); }}
+                  >Create account</button>
+                </div>
+                <form onSubmit={handleAuthSubmit}>
+                  <div style={styles.formGrid}>
+                    {authMode === "signup" && (
+                      <Field label="Display name (optional)">
+                        <input style={styles.input} value={authDisplayName} onChange={(e) => setAuthDisplayName(e.target.value)} placeholder="e.g. Pax" />
+                      </Field>
+                    )}
+                    <Field label="Email">
+                      <input type="email" style={styles.input} value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} required />
+                    </Field>
+                    <Field label="Password">
+                      <input type="password" style={styles.input} value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} required minLength={6} />
+                    </Field>
+                  </div>
+                  <button type="submit" style={styles.primaryButtonWide} disabled={authBusy}>
+                    {authBusy ? "Working…" : authMode === "signup" ? "Create account" : "Sign in"}
+                  </button>
+                  {authMode === "signin" && (
+                    <button type="button" style={{ ...styles.retryLink, display: "block", marginTop: 10 }} onClick={handleForgotPassword} disabled={authBusy}>
+                      Forgot password?
+                    </button>
+                  )}
+                  {authError && <p style={styles.errorText}>{authError}</p>}
+                </form>
+              </div>
+            )}
+          </div>
+
+          {user && (
+            <div style={styles.card}>
+              <h3 className="ffont" style={styles.chartTitle}>Friends</h3>
+              <p style={styles.locationNote}>Add a friend by the email they signed up with, then compare species counts once they've logged sightings of their own.</p>
+              <form onSubmit={sendFriendRequest} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                <div style={{ flex: "1 1 220px" }}>
+                  <Field label="Friend's email">
+                    <input type="email" style={styles.input} value={friendEmail} onChange={(e) => setFriendEmail(e.target.value)} placeholder="friend@example.com" required />
+                  </Field>
+                </div>
+                <button type="submit" style={styles.primaryButton} disabled={friendBusy}>{friendBusy ? "Sending…" : "+ Add friend"}</button>
+                <button type="button" style={styles.iconButton} onClick={() => refreshSocialData(user.uid)}>Refresh</button>
+              </form>
+              {friendError && <p style={styles.errorText}>{friendError}</p>}
+
+              {incomingRequests.length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  <p style={styles.suggestLabel}>Friend requests</p>
+                  {incomingRequests.map((r) => (
+                    <div key={r.id} style={styles.friendRequestRow}>
+                      <span>{r.fromEmail}</span>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button type="button" style={styles.iconButton} onClick={() => respondToRequest(r.id, true)}>Accept</button>
+                        <button type="button" style={styles.iconButton} onClick={() => respondToRequest(r.id, false)}>Decline</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {outgoingRequests.length > 0 && (
+                <p style={{ ...styles.suggestLabel, marginTop: 14 }}>
+                  Waiting on: {outgoingRequests.map((r) => r.toEmail).join(", ")}
+                </p>
+              )}
+
+              <div style={{ marginTop: 16 }}>
+                <p style={styles.suggestLabel}>Leaderboard — unique species logged</p>
+                {leaderboard.map((row, i) => (
+                  <div key={row.uid} style={{ ...styles.leaderboardRow, ...(row.isYou ? styles.leaderboardRowYou : {}) }}>
+                    <span style={styles.leaderboardRank}>{i + 1}</span>
+                    <span style={{ flex: 1, fontWeight: row.isYou ? 700 : 500 }}>{row.name}{row.isYou ? " (you)" : ""}</span>
+                    <span className="mfont" style={{ fontSize: 13 }}>{row.uniqueSpecies} species</span>
+                    <span className="mfont" style={{ fontSize: 12, color: "var(--text-muted)", width: 90, textAlign: "right" }}>{row.totalSightings} sightings</span>
+                  </div>
+                ))}
+                {friends.length === 0 && <p style={styles.emptyText}>Add a friend to start comparing.</p>}
+              </div>
+            </div>
+          )}
+
+          <div style={styles.card}>
+            <h3 className="ffont" style={styles.chartTitle}>Your data</h3>
+            <p style={styles.locationNote}>
+              {user
+                ? "Everything you log — sightings, photos, and saved locations — is saved to this browser and backed up to your account, so it'll follow you if you sign in somewhere else. Export a backup regularly anyway, just in case."
+                : "Everything you log — sightings, photos, and saved locations — stays in this browser's storage only for now. Sign in above to back it up to your account and access it from other devices. Export a backup regularly if it matters to you."}
+            </p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" style={styles.iconButton} onClick={exportJSON}>Export as JSON</button>
+              <button type="button" style={styles.iconButton} onClick={exportCSV}>Export as CSV</button>
+            </div>
+          </div>
+
+          <div style={styles.card}>
+            <h3 className="ffont" style={styles.chartTitle}>Clear sightings by time frame</h3>
+            <p style={styles.locationNote}>
+              Remove logged sightings for <strong>{activeLocation ? activeLocation.name : "this location"}</strong> within a specific month or year. Locations, photos of other months/years, and app settings are left alone.
+            </p>
+            <div style={styles.formGrid}>
+              <Field label="Time frame">
+                <select style={styles.input} value={resetScope} onChange={(e) => setResetScope(e.target.value)}>
+                  <option value="month">A specific month</option>
+                  <option value="year">A specific year</option>
+                  <option value="all">All time, this location</option>
+                </select>
+              </Field>
+              {resetScope === "month" && (
+                <Field label="Month">
+                  <input type="month" style={styles.input} value={resetMonth} onChange={(e) => setResetMonth(e.target.value)} />
+                </Field>
+              )}
+              {resetScope === "year" && (
+                <Field label="Year">
+                  <select style={styles.input} value={resetYear} onChange={(e) => setResetYear(e.target.value)}>
+                    {availableYears.map((y) => <option key={y} value={y}>{y}</option>)}
+                  </select>
+                </Field>
+              )}
+            </div>
+            <p style={styles.suggestLabel}>
+              {resetPreviewCount} sighting{resetPreviewCount === 1 ? "" : "s"} will be deleted.
+            </p>
+            <button
+              type="button"
+              style={{ ...styles.dangerButton, ...(resetPreviewCount === 0 ? styles.dangerButtonDisabled : {}) }}
+              disabled={resetPreviewCount === 0}
+              onClick={handleScopedReset}
+            >
+              Delete {resetPreviewCount > 0 ? resetPreviewCount : ""} sighting{resetPreviewCount === 1 ? "" : "s"}
+            </button>
+          </div>
+
+          <div style={styles.dangerCard}>
+            <h3 className="ffont" style={{ ...styles.chartTitle, color: "#A8455F" }}>Danger zone</h3>
+            <p style={styles.locationNote}>
+              Permanently erase every sighting, photo, and saved location across your entire log — every time frame, every location. This can't be undone; export a backup first if you're not sure.
+            </p>
+            <Field label='Type "RESET" to confirm'>
+              <input style={styles.input} value={confirmResetText} onChange={(e) => setConfirmResetText(e.target.value)} placeholder="RESET" />
+            </Field>
+            <button
+              type="button"
+              style={{ ...styles.dangerButtonWide, ...(confirmResetText.trim().toUpperCase() !== "RESET" ? styles.dangerButtonDisabled : {}) }}
+              disabled={confirmResetText.trim().toUpperCase() !== "RESET"}
+              onClick={resetAllData}
+            >
+              Reset all data
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const styles = {
+  header: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12, marginBottom: 20 },
+  eyebrow: { margin: 0, fontSize: 11.5, letterSpacing: "0.08em", color: "#1F8A68", fontWeight: 700 },
+  title: { margin: "4px 0 0", fontSize: 32, fontWeight: 700, color: "var(--text)" },
+  headerActions: { display: "flex", gap: 8, alignItems: "center" },
+  iconButton: { display: "flex", alignItems: "center", gap: 6, background: "var(--card-bg)", border: "1.5px solid var(--border)", borderRadius: 10, padding: "8px 14px", fontSize: 13, fontWeight: 600, color: "var(--text)" },
+  primaryButton: { display: "flex", alignItems: "center", gap: 6, background: "#2E6B3E", border: "1.5px solid #2E6B3E", borderRadius: 10, padding: "8px 16px", fontSize: 13, color: "#FFFFFF", fontWeight: 700 },
+  primaryButtonWide: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#2E6B3E", border: "none", borderRadius: 10, padding: "12px 16px", fontSize: 14, color: "#FFFFFF", fontWeight: 700, marginTop: 14, width: "100%" },
+  errorText: { color: "#A8455F", fontSize: 13, marginTop: -10, marginBottom: 12, fontWeight: 600 },
+  statsRow: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 12 },
+  statCard: { borderRadius: 12, padding: "12px 14px" },
+  statLabel: { margin: 0, fontSize: 11.5, fontWeight: 700 },
+  statValue: { margin: "4px 0 0", fontSize: 24 },
+  badgeRow: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 20 },
+  badgePill: { fontSize: 11, fontWeight: 700, padding: "4px 9px", borderRadius: 999, border: "1.5px solid var(--border)", color: "var(--text-dim)", background: "var(--card-bg)" },
+  badgePillEarned: { color: "#FFFFFF", background: "#1F8A68", borderColor: "#1F8A68" },
+  tabs: { display: "flex", gap: 4, marginBottom: 16, background: "var(--tabs-bg)", padding: 4, borderRadius: 12, flexWrap: "wrap" },
+  tabButton: { display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", padding: "9px 16px", fontSize: 13.5, color: "var(--text-muted)", fontWeight: 600, borderRadius: 8 },
+  card: { background: "var(--card-bg)", border: "1.5px solid var(--border)", borderRadius: 16, padding: 16, marginBottom: 16 },
+  formToggle: { display: "flex", alignItems: "center", gap: 8, width: "100%", background: "none", border: "none", padding: 0, color: "var(--text)" },
+  form: { marginTop: 14 },
+  formGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 },
+  field: { display: "flex", flexDirection: "column", gap: 5 },
+  fieldLabel: { fontSize: 11.5, color: "var(--text-muted)", fontWeight: 600 },
+  suggestWrap: { marginTop: 12 },
+  suggestLabel: { fontSize: 11.5, color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 6 },
+  previewWrap: { marginTop: 14 },
+  hoverPopup: {
+    position: "absolute", top: "calc(100% + 8px)", left: "50%", transform: "translateX(-50%)", zIndex: 30,
+    width: 232, background: "var(--card-bg)", border: "2px solid var(--border)", borderRadius: 18,
+    padding: 12, textAlign: "center", boxShadow: "0 10px 30px var(--shadow)",
+  },
+  hoverImageWrap: { width: 184, height: 184, borderRadius: 16, background: "var(--border-soft)", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 10px" },
+  hoverImage: { width: "100%", height: "100%", objectFit: "cover" },
+  hoverName: { margin: 0, fontSize: 14.5, fontWeight: 700, color: "var(--text)" },
+  hoverDesc: { fontSize: 12, color: "var(--text-muted)", margin: "4px 0 0", lineHeight: 1.45 },
+  photoCredit: { fontSize: 10.5, color: "var(--text-dim)", fontStyle: "italic", margin: "4px 0 0" },
+  hoverLink: { fontSize: 11.5, color: "#1F5F73", fontWeight: 700, display: "inline-block", marginTop: 8, textDecoration: "none" },
+  locationNote: { fontSize: 12.5, color: "var(--text-muted)", marginBottom: 14, lineHeight: 1.5 },
+  locationSwitchBar: { display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text-muted)", fontWeight: 600, marginBottom: 14 },
+  locationSwitchSelect: { border: "1.5px solid var(--border)", borderRadius: 8, padding: "6px 12px", fontSize: 12.5, background: "var(--tabs-bg)", color: "var(--text)", fontWeight: 700 },
+  retryLink: { border: "none", background: "none", color: "#1F5F73", fontWeight: 700, fontSize: 12.5, padding: 0, textDecoration: "underline" },
+  chipRow: { display: "flex", flexWrap: "wrap", gap: 6 },
+  chip: { border: "1.5px solid transparent", borderRadius: 8, padding: "6px 12px", fontSize: 12.5, fontWeight: 600 },
+  miniInfoButton: { width: 20, height: 20, borderRadius: "50%", border: "1.5px solid", background: "var(--card-bg)", fontSize: 11, fontWeight: 800, fontFamily: "'Spectral', serif", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  input: { border: "1.5px solid var(--border)", borderRadius: 8, padding: "9px 11px", fontSize: 13.5, background: "var(--input-bg)", color: "var(--text)", width: "100%" },
+  filterBar: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 },
+  searchBox: { display: "flex", alignItems: "center", gap: 6, background: "var(--card-bg)", border: "1.5px solid var(--border)", borderRadius: 8, padding: "7px 12px", flex: "1 1 180px" },
+  searchInput: { border: "none", outline: "none", background: "none", fontSize: 13.5, width: "100%", color: "var(--text)" },
+  filterSelect: { border: "1.5px solid var(--border)", borderRadius: 8, padding: "7px 12px", fontSize: 13, background: "var(--card-bg)", color: "var(--text)" },
+  entryList: { display: "flex", flexDirection: "column", gap: 8 },
+  entryRow: { display: "flex", gap: 12, alignItems: "flex-start", background: "var(--card-bg)", border: "1.5px solid var(--border)", borderRadius: 12, padding: "12px 14px" },
+  entryIcon: { width: 34, height: 34, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 17 },
+  entryPhoto: { width: "100%", height: "100%", objectFit: "cover", borderRadius: 10 },
+  entryTop: { display: "flex", alignItems: "baseline", gap: 8 },
+  entrySpecies: { fontSize: 16, color: "var(--text)" },
+  entryQty: { fontSize: 12, color: "var(--text-muted)", fontWeight: 600 },
+  entryMeta: { display: "flex", gap: 10, fontSize: 12, color: "var(--text-muted)", marginTop: 3 },
+  entryNote: { fontSize: 12.5, color: "var(--text-muted)", marginTop: 5, marginBottom: 0, lineHeight: 1.4 },
+  deleteButton: { background: "none", border: "none", color: "var(--text-dim)", padding: 4, flexShrink: 0, fontSize: 15 },
+  emptyText: { color: "var(--text-muted)", fontSize: 13.5, textAlign: "center", padding: "20px 0" },
+  speciesHeaderRow: { display: "flex", fontSize: 11.5, color: "var(--text-muted)", fontWeight: 700, padding: "0 0 8px", borderBottom: "1.5px solid var(--border)", marginBottom: 6, alignItems: "center" },
+  speciesRow: { display: "flex", alignItems: "center", padding: "9px 0", borderBottom: "1px solid var(--border-soft)", gap: 8 },
+  chartTitle: { margin: "0 0 12px", fontSize: 17, fontWeight: 700, color: "var(--text)" },
+  infoLink: {
+    flex: "0 0 22px", width: 22, height: 22, borderRadius: "50%", border: "2px solid #C9922E",
+    color: "#7A5A1F", background: "var(--card-bg)", fontSize: 12, fontWeight: 800, fontFamily: "'Spectral', serif",
+    display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", flexShrink: 0,
+  },
+  infoLinkActive: { background: "#C9922E", color: "#4A3410" },
+  expandedPanel: { padding: "4px 0 14px 0" },
+  guideGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 },
+  guideCard: { display: "flex", gap: 14, background: "var(--card-bg-soft)", border: "1.5px solid var(--border)", borderRadius: 14, padding: 12 },
+  guideImageWrap: { width: 92, height: 92, borderRadius: 14, background: "var(--border-soft)", overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" },
+  guideImage: { width: "100%", height: "100%", objectFit: "cover" },
+  guideCardTop: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 },
+  guideName: { fontSize: 15, color: "var(--text)" },
+  guideDesc: { fontSize: 12.5, color: "var(--text-muted)", margin: "4px 0 0", lineHeight: 1.45 },
+  photoPreview: { width: 56, height: 56, objectFit: "cover", borderRadius: 10, border: "1.5px solid var(--border)" },
+  mapBox: { width: "100%", height: 260, borderRadius: 14, overflow: "hidden", border: "1.5px solid var(--border)" },
+  exportMenu: { position: "absolute", top: "calc(100% + 6px)", right: 0, background: "var(--card-bg)", border: "1.5px solid var(--border)", borderRadius: 10, overflow: "hidden", zIndex: 50, minWidth: 170, boxShadow: "0 10px 26px var(--shadow)" },
+  exportMenuItem: { display: "block", width: "100%", textAlign: "left", padding: "10px 14px", fontSize: 13, fontWeight: 600, color: "var(--text)", background: "none", border: "none" },
+  authTabRow: { display: "flex", gap: 6, marginBottom: 14 },
+  authTabButton: { flex: 1, background: "var(--tabs-bg)", border: "1.5px solid var(--border)", borderRadius: 10, padding: "9px 12px", fontSize: 13, fontWeight: 600, color: "var(--text-muted)" },
+  authTabButtonActive: { background: "#2E6B3E", borderColor: "#2E6B3E", color: "#FFFFFF" },
+  friendRequestRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--border-soft)", fontSize: 13 },
+  leaderboardRow: { display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 10 },
+  leaderboardRowYou: { background: "#2E6B3E14", border: "1px solid #2E6B3E35" },
+  leaderboardRank: { width: 20, textAlign: "center", fontWeight: 800, fontSize: 12.5, color: "var(--text-dim)" },
+  dangerCard: { background: "var(--card-bg)", border: "1.5px solid #A8455F4D", borderRadius: 16, padding: 16, marginBottom: 16 },
+  dangerButton: { display: "inline-flex", alignItems: "center", gap: 6, background: "#A8455F14", border: "1.5px solid #A8455F55", borderRadius: 10, padding: "9px 16px", fontSize: 13, color: "#A8455F", fontWeight: 700, marginTop: 4 },
+  dangerButtonWide: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#A8455F", border: "none", borderRadius: 10, padding: "12px 16px", fontSize: 14, color: "#FFFFFF", fontWeight: 700, marginTop: 6, width: "100%" },
+  dangerButtonDisabled: { opacity: 0.4, cursor: "not-allowed" },
+  onboardingWrap: { display: "flex", justifyContent: "center", paddingTop: "8vh" },
+  onboardingCard: { background: "var(--card-bg)", border: "1.5px solid var(--border)", borderRadius: 18, padding: 28, maxWidth: 440, width: "100%", boxShadow: "0 16px 40px var(--shadow)" },
+  onboardingDivider: { textAlign: "center", fontSize: 11.5, color: "var(--text-dim)", fontWeight: 700, margin: "18px 0 10px", textTransform: "uppercase", letterSpacing: "0.06em" },
+  toast: { position: "fixed", top: 20, right: 20, background: "#17241D", color: "#FFFFFF", padding: "12px 16px", borderRadius: 12, fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.3)", zIndex: 60, maxWidth: 280 },
+  toastAccent: { width: 8, height: 8, borderRadius: "50%", background: "#4ADE80", flexShrink: 0 },
+};
+
+ReactDOM.createRoot(document.getElementById("root")).render(<BackyardFieldLog />);
+</script>
+</body>
+</html>
